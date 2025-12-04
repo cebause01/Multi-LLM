@@ -1,0 +1,55 @@
+.app {
+  display: flex;
+  height: 100vh;
+  background: linear-gradient(135deg, #0a1929 0%, #1e3a5f 25%, #2d4a7a 50%, #1a2f4d 75%, #0f1b2e 100%);
+}
+
+.sidebar {
+  width: 280px;
+  background: rgba(10, 25, 41, 0.8);
+  backdrop-filter: blur(10px);
+  border-right: 1px solid rgba(59, 130, 246, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.3);
+}
+
+.sidebar-header {
+  padding: 20px;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(138, 43, 226, 0.05) 100%);
+}
+
+.sidebar-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 4px;
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+}
+
+.subtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: transparent;
+}
+
+@media (max-width: 768px) {
+  .app {
+    flex-direction: column;
+  }
+  
+  .sidebar {
+    width: 100%;
+    max-height: 40vh;
+  }
+}
+
