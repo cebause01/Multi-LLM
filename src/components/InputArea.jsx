@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import './InputArea.css'
 
 function InputArea({
@@ -15,20 +15,51 @@ function InputArea({
 }) {
   const fileInputRef = useRef(null)
   const imageInputRef = useRef(null)
+  const imageUrlsRef = useRef([])
 
   const handleImageSelect = (e) => {
     const files = Array.from(e.target.files)
-    setSelectedImages(prev => [...prev, ...files])
+    const maxSize = 10 * 1024 * 1024 // 10MB
+    const validFiles = []
+    
+    files.forEach(file => {
+      if (file.size > maxSize) {
+        alert(`Image "${file.name}" is too large. Maximum size is 10MB.`)
+        return
+      }
+      validFiles.push(file)
+    })
+    
+    if (validFiles.length > 0) {
+      setSelectedImages(prev => [...prev, ...validFiles])
+    }
     e.target.value = ''
   }
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files)
-    setSelectedFiles(prev => [...prev, ...files])
+    const maxSize = 10 * 1024 * 1024 // 10MB
+    const validFiles = []
+    
+    files.forEach(file => {
+      if (file.size > maxSize) {
+        alert(`File "${file.name}" is too large. Maximum size is 10MB.`)
+        return
+      }
+      validFiles.push(file)
+    })
+    
+    if (validFiles.length > 0) {
+      setSelectedFiles(prev => [...prev, ...validFiles])
+    }
     e.target.value = ''
   }
 
   const removeImage = (index) => {
+    // Clean up the object URL to prevent memory leaks
+    // Note: URLs are created in render, so we'll clean up all and let them be recreated
+    imageUrlsRef.current.forEach(url => URL.revokeObjectURL(url))
+    imageUrlsRef.current = []
     setSelectedImages(prev => prev.filter((_, i) => i !== index))
   }
 
@@ -36,25 +67,41 @@ function InputArea({
     setSelectedFiles(prev => prev.filter((_, i) => i !== index))
   }
 
+  // Cleanup object URLs when component unmounts or images change
+  useEffect(() => {
+    return () => {
+      // Revoke all object URLs on unmount
+      imageUrlsRef.current.forEach(url => URL.revokeObjectURL(url))
+      imageUrlsRef.current = []
+    }
+  }, [])
+
   return (
     <div className="input-area">
       {(selectedImages.length > 0 || selectedFiles.length > 0) && (
         <div className="attachments-preview">
-          {selectedImages.map((img, idx) => (
-            <div key={idx} className="attachment-item">
-              <img 
-                src={URL.createObjectURL(img)} 
-                alt={`Preview ${idx + 1}`}
-                className="attachment-preview"
-              />
-              <button 
-                className="remove-attachment"
-                onClick={() => removeImage(idx)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
+          {selectedImages.map((img, idx) => {
+            const imageUrl = URL.createObjectURL(img)
+            // Track the URL for cleanup
+            if (!imageUrlsRef.current.includes(imageUrl)) {
+              imageUrlsRef.current.push(imageUrl)
+            }
+            return (
+              <div key={idx} className="attachment-item">
+                <img 
+                  src={imageUrl} 
+                  alt={`Preview ${idx + 1}`}
+                  className="attachment-preview"
+                />
+                <button 
+                  className="remove-attachment"
+                  onClick={() => removeImage(idx)}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
           {selectedFiles.map((file, idx) => (
             <div key={idx} className="attachment-item file">
               <span className="file-icon">📄</span>

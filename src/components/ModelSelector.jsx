@@ -6,17 +6,15 @@ function ModelSelector({
   judgeModel, 
   onModelToggle, 
   onJudgeModelChange,
-  isLoading 
+  isLoading,
+  hipaaEnabled,
+  onHipaaToggle
 }) {
   const popularModels = [
-    'openrouter/bert-nebulon-alpha',
-    'x-ai/grok-4.1-fast:free',
     'nvidia/nemotron-nano-12b-v2-vl:free',
     'google/gemma-3-4b-it:free',
     'google/gemma-3-12b-it:free',
-    'google/gemma-3-27b-it:free',
-    'google/gemini-2.0-flash-exp:free',
-    'moonshotai/kimi-k2:free'
+    'google/gemma-3-27b-it:free'
   ]
 
   // Format model names for better display
@@ -35,7 +33,7 @@ function ModelSelector({
     ? availableModels.filter(m => popularModels.includes(m.id))
     : popularModels.map(id => ({ id, name: id }))
 
-  const progressPercentage = (selectedModels.length / 5) * 100
+  const progressPercentage = Math.min((selectedModels.length / 10) * 100, 100) // Show progress up to 10 models
 
   return (
     <div className="model-selector">
@@ -43,7 +41,7 @@ function ModelSelector({
         <div className="section-header">
           <h3>Select Models</h3>
           <div className="progress-indicator">
-            <span className="progress-text">{selectedModels.length}/5</span>
+            <span className="progress-text">{selectedModels.length} selected</span>
             <div className="progress-bar">
               <div 
                 className="progress-fill" 
@@ -61,7 +59,7 @@ function ModelSelector({
           ) : (
             displayModels.map(model => {
               const isSelected = selectedModels.includes(model.id)
-              const isDisabled = !isSelected && selectedModels.length >= 5
+              const isDisabled = false // Allow unlimited model selection
               const formatted = formatModelName(model.id)
               
               return (
@@ -114,6 +112,22 @@ function ModelSelector({
               )
             })}
           </select>
+        </div>
+        
+        <div className="hipaa-toggle-wrapper">
+          <label className="hipaa-toggle-label">
+            <input
+              type="checkbox"
+              checked={hipaaEnabled}
+              onChange={(e) => onHipaaToggle(e.target.checked)}
+              className="hipaa-toggle-input"
+            />
+            <span className="hipaa-toggle-slider"></span>
+            <span className="hipaa-toggle-text">HIPAA</span>
+          </label>
+          {hipaaEnabled && (
+            <span className="hipaa-description">PHI/PII filtering enabled</span>
+          )}
         </div>
       </div>
     </div>

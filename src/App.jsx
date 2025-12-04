@@ -8,6 +8,7 @@ function App() {
   const [judgeModel, setJudgeModel] = useState('google/gemini-2.0-flash-exp:free')
   const [availableModels, setAvailableModels] = useState([])
   const [isLoadingModels, setIsLoadingModels] = useState(true)
+  const [hipaaEnabled, setHipaaEnabled] = useState(false)
 
   useEffect(() => {
     fetchAvailableModels()
@@ -53,6 +54,8 @@ function App() {
           onModelToggle={handleModelToggle}
           onJudgeModelChange={setJudgeModel}
           isLoading={isLoadingModels}
+          hipaaEnabled={hipaaEnabled}
+          onHipaaToggle={setHipaaEnabled}
         />
       </div>
 
@@ -60,6 +63,7 @@ function App() {
         <ChatInterface
           selectedModels={selectedModels}
           judgeModel={judgeModel}
+          hipaaEnabled={hipaaEnabled}
         />
       </div>
     </div>

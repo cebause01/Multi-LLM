@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import './MessageList.css'
 
@@ -10,7 +10,7 @@ function MessageList({ messages, isLoading, messagesEndRef }) {
       <div className="message-list empty">
         <div className="empty-state">
           <h3>Start a conversation</h3>
-          <p>Select 5 models and send a message to compare their responses</p>
+          <p>Select at least 1 model and send a message to compare their responses</p>
         </div>
         <div ref={messagesEndRef} />
       </div>
@@ -46,6 +46,70 @@ function MessageList({ messages, isLoading, messagesEndRef }) {
 }
 
 function Message({ message, isExpanded, onToggleExpand }) {
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setShowExportMenu(false);
+      }
+    };
+
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showExportMenu]);
+
+  const exportMessage = async (format) => {
+    try {
+      const endpoint = format === 'pdf' ? '/api/export/pdf' : '/api/export/docx';
+      const fileExtension = format === 'pdf' ? 'pdf' : 'docx';
+      
+      const response = await fetch(`http://localhost:3001${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [{
+            role: message.role,
+            content: message.content,
+            model: message.model,
+            reason: message.reason,
+            timestamp: new Date(message.id).toISOString()
+          }],
+          title: `Response Export ${new Date().toLocaleDateString()}`
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to generate document');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `response-export-${Date.now()}.${fileExtension}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setShowExportMenu(false);
+    } catch (error) {
+      console.error(`Error exporting to ${format.toUpperCase()}:`, error);
+      alert(`Failed to export document: ${error.message}`);
+      setShowExportMenu(false);
+    }
+  };
+
   if (message.role === 'user') {
     return (
       <div className="message user">
@@ -80,14 +144,71 @@ function Message({ message, isExpanded, onToggleExpand }) {
   return (
     <div className={`message assistant ${message.isError ? 'error' : ''}`}>
       <div className="message-content">
-        {message.model && (
-          <div className="model-badge">
-            {message.model}
+        <div className="message-header-actions">
+          {message.model && (
+            <div className="model-badge">
+              {message.model}
+            </div>
+          )}
+          <div className="message-export-container" ref={exportMenuRef}>
+            <button 
+              className="message-export-button"
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              title="Export this response"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="currentColor"/>
+              </svg>
+            </button>
+            {showExportMenu && (
+              <div className="export-dropdown">
+                <button 
+                  className="export-dropdown-item"
+                  onClick={() => exportMessage('pdf')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" fill="currentColor"/>
+                  </svg>
+                  Export as PDF
+                </button>
+                <button 
+                  className="export-dropdown-item"
+                  onClick={() => exportMessage('docx')}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" fill="currentColor"/>
+                  </svg>
+                  Export as DOCX
+                </button>
+              </div>
+            )}
           </div>
-        )}
+        </div>
         <div className="message-text">
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
+        {message.documentData && !message.isError && (
+          <div className="document-download-section">
+            <a
+              href={message.documentData.url}
+              download={message.documentData.fileName}
+              className="document-download-link"
+              onClick={(e) => {
+                // Clean up the blob URL after download starts
+                setTimeout(() => {
+                  URL.revokeObjectURL(message.documentData.url);
+                }, 100);
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              Download {message.documentData.fileName}
+            </a>
+          </div>
+        )}
         {message.reason && (
           <button 
             className="expand-button"
