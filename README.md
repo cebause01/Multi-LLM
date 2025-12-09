@@ -41,9 +41,21 @@ A modern AI chat application that compares responses from 5 different AI models 
 4. **Send**: Press Enter or click the send button
 5. **View Results**: See the best response selected by the judge model, with an option to expand and view all 5 responses
 
-## API Key
+## API Key Configuration
 
-The OpenRouter API key is configured in `server.js`. Make sure to keep it secure in production environments.
+1. **Copy the example environment file:**
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Edit `.env` and add your OpenRouter API key:**
+   ```
+   OPENROUTER_API_KEY=your_api_key_here
+   ```
+
+3. **Get your API key from:** https://openrouter.ai/keys
+
+The API key is now securely stored in the `.env` file (which is git-ignored). Make sure to never commit your `.env` file to version control.
 
 ## Tech Stack
 

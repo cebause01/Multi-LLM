@@ -35,7 +35,8 @@ if (typeof window !== 'undefined') {
   initializePDFWorker()
 }
 
-function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
+function ChatInterface({ selectedModels, judgeModel, hipaaEnabled, cragEnabled, judgeEnabled, authToken, user, onSavedSummary, onOpenSettings, onLogout }) {
+  const [showUserMenu, setShowUserMenu] = useState(false)
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [inputText, setInputText] = useState('')
@@ -51,7 +52,30 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
     scrollToBottom()
   }, [messages])
 
+  // Allow user to pick a response when judge is disabled
+  const handleSelectResponse = (messageId, responseIndex) => {
+    setMessages(prev => prev.map(msg => {
+      if (msg.id !== messageId) return msg
+      const chosen = msg.allResponses?.[responseIndex]
+      if (!chosen) return msg
+      return {
+        ...msg,
+        content: chosen.response || chosen.error || 'No response',
+        model: chosen.model,
+        selectedResponseIndex: responseIndex,
+        reason: 'User selected this response',
+        isError: !!chosen.error
+      }
+    }))
+  }
+
+
   const handleSend = async () => {
+    if (!authToken) {
+      alert('Please log in before chatting so we can store your conversation.');
+      return;
+    }
+
     if (!inputText.trim() && selectedImages.length === 0 && selectedFiles.length === 0) {
       return
     }
@@ -339,18 +363,25 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
         judgeModel: judgeModel,
         images: imagesBase64,
         files: filesData,
-        hipaaEnabled: hipaaEnabled
+        hipaaEnabled: hipaaEnabled,
+        cragEnabled: cragEnabled,
+        judgeEnabled: judgeEnabled
       }
 
       console.log('Sending request with base64 images:', imagesBase64.length)
+      console.log('Judge enabled:', judgeEnabled)
       if (hipaaEnabled) {
-        console.log('🔒 HIPAA compliance mode is ENABLED - PHI/PII filtering active')
+        console.log('HIPAA compliance mode is ENABLED - PHI/PII filtering active')
+      }
+      if (!judgeEnabled) {
+        console.log('👤 Judge is OFF - all responses will be shown for manual selection')
       }
 
       const response = await fetch('http://localhost:3001/api/chat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
         },
         body: JSON.stringify(requestData)
       })
@@ -361,6 +392,13 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
       }
 
       const data = await response.json()
+      
+      // Debug logging
+      console.log('Response data:', {
+        judgeDisabled: data.judgeDisabled,
+        allResponsesCount: data.allResponses?.length,
+        bestResponse: data.bestResponse?.model
+      })
 
       // Check if the response is an error
       const isErrorResponse = data.bestResponse.error || 
@@ -391,19 +429,54 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
         }
       }
 
+      // When judge is disabled, show a placeholder message and let user choose
+      let messageContent = data.bestResponse.response || data.bestResponse.error || 'No response';
+      let messageModel = data.bestResponse.model;
+      
+      // If judge is disabled, show a simple header; cards will render below
+      if (data.judgeDisabled && data.allResponses && data.allResponses.length > 0) {
+        messageContent = `**${data.allResponses.length} model response(s) received.**`;
+        messageModel = null; // Don't show a specific model badge
+      }
+      
       const assistantMessage = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: data.bestResponse.response || data.bestResponse.error || 'No response',
-        model: data.bestResponse.model,
+        content: messageContent,
+        model: messageModel,
         reason: data.bestResponse.reason,
         allResponses: data.allResponses,
         judgeResult: data.judgeResult,
         documentData: documentData, // Store document data for download link (only if successful)
-        isError: isErrorResponse // Mark if this is an error response
+        isError: isErrorResponse, // Mark if this is an error response
+        cragInfo: data.cragInfo, // CRAG information
+        judgeDisabled: data.judgeDisabled || false,
+        personalRag: data.personalRag,
+        selectedResponseIndex: data.judgeDisabled ? null : undefined
       }
 
       setMessages(prev => [...prev, assistantMessage])
+
+      // Send session summary to personal RAG if authenticated
+      if (authToken) {
+        try {
+          const summaryPayload = {
+            messages: conversationHistory,
+            assistantResponse: data.bestResponse.response || ''
+          }
+          await fetch('http://localhost:3001/api/session/summary', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${authToken}`
+            },
+            body: JSON.stringify(summaryPayload)
+          })
+          if (onSavedSummary) onSavedSummary()
+        } catch (err) {
+          console.error('Summary save failed', err)
+        }
+      }
     } catch (error) {
       console.error('Error:', error)
       let errorMessage = 'Failed to get response'
@@ -704,8 +777,67 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
       <div className="chat-header">
         <div className="chat-header-top">
           <h2>Chat</h2>
-          {messages.length > 0 && (
-            <div className="export-container" ref={exportMenuRef}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {user && (
+              <div className="user-menu-container">
+                <button 
+                  className="user-menu-button"
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                >
+                  <span className="user-name">{user.nickname || 'User'}</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ marginLeft: '6px', transition: 'transform 0.2s', transform: showUserMenu ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                {showUserMenu && (
+                  <>
+                    <div 
+                      className="dropdown-backdrop"
+                      onClick={() => setShowUserMenu(false)}
+                      style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        zIndex: 999
+                      }}
+                    />
+                    <div className="user-menu-dropdown">
+                      <button 
+                        className="user-menu-item"
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          onOpenSettings && onOpenSettings()
+                        }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24-4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24 4.24"/>
+                        </svg>
+                        Settings
+                      </button>
+                      <button 
+                        className="user-menu-item"
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          onLogout && onLogout()
+                        }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                          <polyline points="16 17 21 12 16 7"/>
+                          <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                        Logout
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+            {messages.length > 0 && (
+              <div className="export-container" ref={exportMenuRef}>
               <button 
                 className="export-button"
                 onClick={() => setShowExportMenu(!showExportMenu)}
@@ -738,15 +870,26 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
                   </button>
                 </div>
               )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
-        {selectedModels.length === 0 && (
+        {!authToken && (
+          <p className="warning" style={{ marginTop: '10px', padding: '12px', background: 'rgba(220, 38, 38, 0.2)', border: '1px solid rgba(220, 38, 38, 0.5)', borderRadius: '8px' }}>
+            Please log in to start chatting. Your conversations will be saved and personalized.
+          </p>
+        )}
+        {authToken && selectedModels.length === 0 && (
           <p className="warning">Select at least 1 model to start chatting</p>
         )}
         {hipaaEnabled && (
           <div className="hipaa-badge">
             HIPAA Mode: PHI/PII Filtering Active
+          </div>
+        )}
+        {cragEnabled && (
+          <div className="crag-badge" style={{ marginTop: '10px' }}>
+            🔍 CRAG: Retrieval Augmented Generation Active
           </div>
         )}
       </div>
@@ -755,6 +898,7 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
         messages={messages} 
         isLoading={isLoading}
         messagesEndRef={messagesEndRef}
+        onSelectResponse={handleSelectResponse}
       />
 
       <InputArea
@@ -767,7 +911,7 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled }) {
         onSend={handleSend}
         onKeyPress={handleKeyPress}
         isLoading={isLoading}
-        canSend={selectedModels.length > 0}
+        canSend={authToken && selectedModels.length > 0}
       />
     </div>
   )

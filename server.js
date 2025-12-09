@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -7,12 +8,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import PDFDocument from 'pdfkit';
+import * as cragService from './cragService.js';
+import * as authService from './authService.js';
+import * as personalRagService from './personalRagService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 // Parse JSON bodies - must come before routes
@@ -25,9 +29,33 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Auth middleware
+async function requireAuth(req, res, next) {
+  try {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const decoded = authService.verifyToken(token);
+    req.user = { id: decoded.userId, email: decoded.email };
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+}
+
 const upload = multer({ dest: uploadsDir });
 
-const OPENROUTER_API_KEY = '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';
+// Load API keys from environment variables
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+if (!OPENROUTER_API_KEY) {
+  console.error('⚠️  WARNING: OPENROUTER_API_KEY is not set in .env file');
+  console.error('   Please create a .env file with your OpenRouter API key');
+  console.error('   Get your API key from: https://openrouter.ai/keys');
+  process.exit(1);
+}
+
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 // Helper function to convert file to base64
@@ -50,6 +78,159 @@ function getMimeType(filePath) {
   };
   return mimeTypes[ext] || 'application/octet-stream';
 }
+
+// ---------- Auth & Profile ----------
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { email, password, nickname } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    
+    // Basic validation
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Email and password must be strings' });
+    }
+    
+    const user = await authService.createUser({ email, password, nickname });
+    const token = authService.signToken(user);
+    res.json({ token, user });
+  } catch (err) {
+    console.error('Signup error:', err.message);
+    console.error('Signup error details:', err);
+    // Return a more user-friendly error message
+    const errorMessage = err.message || 'Failed to create account';
+    res.status(400).json({ error: errorMessage });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+    const user = await authService.verifyUser({ email, password });
+    const token = authService.signToken(user);
+    res.json({ token, user });
+  } catch (err) {
+    console.error('Login error:', err.message);
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  res.json({ user: req.user });
+});
+
+app.get('/api/user/profile', requireAuth, async (req, res) => {
+  try {
+    const profile = await authService.getUserById(req.user.id);
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/user/profile', requireAuth, async (req, res) => {
+  try {
+    const { 
+      nickname,
+      occupation,
+      moreAboutYou,
+      instructions,
+      baseStyle,
+      concise,
+      warm,
+      enthusiastic,
+      formal,
+      headersLists,
+      emoji,
+      referenceSavedMemories,
+      referenceChatHistory
+    } = req.body || {};
+    const profile = await authService.updateProfile(req.user.id, { 
+      nickname,
+      occupation,
+      moreAboutYou,
+      instructions,
+      baseStyle,
+      concise,
+      warm,
+      enthusiastic,
+      formal,
+      headersLists,
+      emoji,
+      referenceSavedMemories,
+      referenceChatHistory
+    });
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- Session Summary & Personal RAG ----------
+app.post('/api/session/summary', requireAuth, async (req, res) => {
+  try {
+    const { messages = [], assistantResponse = '' } = req.body || {};
+    const prompt = `
+Summarize the following chat session in 3-5 bullet points. Focus on key intents and facts that are useful for future retrieval.
+
+Messages:
+${messages.map(m => `- ${m.role}: ${m.content}`).join('\n')}
+
+Assistant latest reply:
+${assistantResponse}
+`;
+
+    const summaryResponse = await axios.post(
+      OPENROUTER_API_URL,
+      {
+        model: 'google/gemini-2.0-flash-exp:free',
+        messages: [{ role: 'user', content: prompt }]
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const summary = summaryResponse.data.choices?.[0]?.message?.content?.trim() || '';
+    const title = `Session ${new Date().toISOString().substring(0, 10)}`;
+
+    await personalRagService.storeSummary({
+      userId: req.user.id,
+      title,
+      summary,
+      messages
+    });
+
+    res.json({ success: true, summary });
+  } catch (err) {
+    console.error('Summary error:', err.response?.data || err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/session/summaries', requireAuth, async (req, res) => {
+  try {
+    const summaries = await personalRagService.getSummaries(req.user.id);
+    res.json({ summaries });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/session/summaries/:summaryId', requireAuth, async (req, res) => {
+  try {
+    const { summaryId } = req.params;
+    await personalRagService.deleteSummary(req.user.id, summaryId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Chat completion endpoint
 app.post('/api/chat', async (req, res) => {
@@ -78,7 +259,37 @@ app.post('/api/chat', async (req, res) => {
       });
     }
     
-    const { text, models, judgeModel, images, files, hipaaEnabled, conversationHistory } = req.body || {};
+    const { text, models, judgeModel, images, files, hipaaEnabled, conversationHistory, cragEnabled, judgeEnabled = true } = req.body || {};
+    
+    // Require auth (personal RAG and storage)
+    let userId = null;
+    let userEmail = null;
+    let userNickname = null;
+    let userInstructions = null;
+    const authHeader = req.headers.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      try {
+        const decoded = authService.verifyToken(authHeader.slice(7));
+        userId = decoded.userId;
+        userEmail = decoded.email;
+        // Get full user profile including all personalization settings
+        const userProfile = await authService.getUserById(userId);
+        if (userProfile) {
+          userNickname = userProfile.nickname || null;
+          userInstructions = userProfile.instructions || null;
+          // Store all personalization settings for use in prompt
+          req.userProfile = userProfile;
+        }
+      } catch (err) {
+        return res.status(401).json({ error: 'Unauthorized: invalid token' });
+      }
+    }
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized: login required before chatting' });
+    }
+    
+    // Normalize judgeEnabled to boolean (handles string "false")
+    const isJudgeEnabled = !(judgeEnabled === false || judgeEnabled === 'false');
     
     // Debug logging
     console.log('Received request body:', { 
@@ -87,11 +298,18 @@ app.post('/api/chat', async (req, res) => {
       judgeModel,
       imagesCount: images?.length || 0,
       filesCount: files?.length || 0,
-      hipaaEnabled: hipaaEnabled || false
+      hipaaEnabled: hipaaEnabled || false,
+      judgeEnabledRaw: judgeEnabled,
+      judgeEnabled: isJudgeEnabled,
+      cragEnabled: cragEnabled || false
     });
     
     if (hipaaEnabled) {
       console.log('🔒 HIPAA compliance mode ENABLED - PHI/PII filtering will be applied');
+    }
+    
+    if (cragEnabled) {
+      console.log('🔍 CRAG mode ENABLED - Retrieval Augmented Generation with correction');
     }
     
     // Check if models field exists
@@ -128,6 +346,46 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
+    // Perform CRAG if enabled
+    let cragContext = '';
+    let cragInfo = null;
+    if (cragEnabled && text) {
+      try {
+        console.log('Performing CRAG retrieval...');
+        cragInfo = await cragService.performCRAG(text, true);
+        cragContext = cragInfo.context;
+        
+        if (cragContext) {
+          console.log(`CRAG retrieved ${cragInfo.documents.length} document(s), relevance score: ${cragInfo.evaluation.score.toFixed(2)}`);
+          if (cragInfo.corrected) {
+            console.log(`CRAG corrected query: "${cragInfo.refinedQuery}"`);
+          }
+        } else {
+          console.log('CRAG: No relevant documents found in knowledge base');
+        }
+      } catch (cragError) {
+        console.error('CRAG error:', cragError);
+        // Continue without CRAG context if it fails
+      }
+    }
+
+    // Personal RAG context (per-user)
+    let personalContext = '';
+    let personalMatches = [];
+    if (userId && text) {
+      try {
+        personalMatches = await personalRagService.searchPersonalRag(userId, text, 3);
+        if (personalMatches.length > 0) {
+          personalContext = personalMatches
+            .map((doc, idx) => `[Personal Doc ${idx + 1}]\nTitle: ${doc.title}\n${doc.content}`)
+            .join('\n\n---\n\n');
+          console.log(`Personal RAG: found ${personalMatches.length} entries for user ${userEmail || userId}`);
+        }
+      } catch (err) {
+        console.error('Personal RAG error:', err);
+      }
+    }
+    
     // Build content array
     const content = [];
     
@@ -152,16 +410,101 @@ app.post('/api/chat', async (req, res) => {
 - Focus on the content without referencing any identifying details\n`;
     }
     
+    // Build the user message text with CRAG context and HIPAA instructions
+    let userMessageText = '';
+    
+    // Build personalization prompt from user settings
+    const userProfile = req.userProfile || {};
+    let personalizationPrompt = '';
+    
+    if (userNickname) {
+      personalizationPrompt += `The user's name is ${userNickname}. `;
+    }
+    if (userProfile.occupation) {
+      personalizationPrompt += `The user's occupation is ${userProfile.occupation}. `;
+    }
+    if (userProfile.moreAboutYou) {
+      personalizationPrompt += `About the user: ${userProfile.moreAboutYou}. `;
+    }
+    
+    // Add style and tone preferences
+    const styleInstructions = [];
+    if (userProfile.baseStyle && userProfile.baseStyle !== 'default') {
+      const styleMap = {
+        'professional': 'Polished and precise',
+        'friendly': 'Warm and chatty',
+        'candid': 'Direct and encouraging',
+        'quirky': 'Playful and imaginative',
+        'efficient': 'Concise and plain',
+        'formal': 'Formal',
+        'nerdy': 'Exploratory and enthusiastic',
+        'cynical': 'Critical and sarcastic'
+      };
+      styleInstructions.push(`Base style: ${styleMap[userProfile.baseStyle] || userProfile.baseStyle}`);
+    }
+    
+    // Add style modifiers
+    const modifiers = [];
+    if (userProfile.concise && userProfile.concise !== 'default') {
+      modifiers.push(`Be ${userProfile.concise === 'more' ? 'more concise' : 'less concise'}`);
+    }
+    if (userProfile.warm && userProfile.warm !== 'default') {
+      modifiers.push(`Be ${userProfile.warm === 'more' ? 'warmer' : 'less warm'}`);
+    }
+    if (userProfile.enthusiastic && userProfile.enthusiastic !== 'default') {
+      modifiers.push(`Be ${userProfile.enthusiastic === 'more' ? 'more enthusiastic' : 'less enthusiastic'}`);
+    }
+    if (userProfile.formal && userProfile.formal !== 'default') {
+      modifiers.push(`Be ${userProfile.formal === 'more' ? 'more formal' : 'less formal'}`);
+    }
+    if (userProfile.headersLists && userProfile.headersLists !== 'default') {
+      modifiers.push(`Use ${userProfile.headersLists === 'more' ? 'more' : 'fewer'} headers and lists`);
+    }
+    if (userProfile.emoji && userProfile.emoji !== 'default') {
+      modifiers.push(`Use ${userProfile.emoji === 'more' ? 'more' : 'fewer'} emojis`);
+    }
+    
+    if (modifiers.length > 0) {
+      styleInstructions.push(`Style modifiers: ${modifiers.join(', ')}`);
+    }
+    
+    if (styleInstructions.length > 0) {
+      personalizationPrompt += `Response style: ${styleInstructions.join('. ')}. `;
+    }
+    
+    if (userInstructions) {
+      personalizationPrompt += `User preferences: ${userInstructions}. `;
+    }
+    
+    if (personalizationPrompt) {
+      userMessageText += `[User Context]\n${personalizationPrompt.trim()}\n\n[End User Context]\n\n`;
+    }
+    
+    // Add CRAG context if available
+    if (cragContext) {
+      userMessageText += `[Retrieved Context from Knowledge Base]\n${cragContext}\n\n[End of Context]\n\n`;
+    }
+
+    // Add Personal RAG context if available
+    if (personalContext) {
+      userMessageText += `[Personal Context]\n${personalContext}\n\n[End Personal Context]\n\n`;
+    }
+    
+    // Add user's text
     if (text) {
+      userMessageText += text;
+    }
+    
+    // Add HIPAA instructions
+    if (hipaaInstructions) {
+      userMessageText += hipaaInstructions;
+    }
+    
+    // Add the combined text to content
+    if (userMessageText.trim()) {
       content.push({
         type: 'text',
-        text: text + hipaaInstructions
-      });
-    } else if (hipaaInstructions) {
-      // If no text but HIPAA is enabled, add instructions separately
-      content.push({
-        type: 'text',
-        text: hipaaInstructions.trim()
+        text: userMessageText.trim()
       });
     }
 
@@ -342,7 +685,7 @@ app.post('/api/chat', async (req, res) => {
         
         // Check for specific error cases
         if (errorMessage.includes('User not found') || errorMessage.includes('user not found')) {
-          displayError = `Authentication error: Your OpenRouter API key is invalid or expired. Please check your API key in server.js. Get a new key at https://openrouter.ai/keys`;
+          displayError = `Authentication error: Your OpenRouter API key is invalid or expired. Please check your API key in .env file. Get a new key at https://openrouter.ai/keys`;
         } else if (errorMessage.includes('data policy') || errorMessage.includes('Free model publication')) {
           displayError = `Privacy settings required: To use free models, configure your OpenRouter privacy settings at https://openrouter.ai/settings/privacy. The model "${model}" requires free model publication to be enabled.`;
         } else if (errorMessage.includes('provider') || errorMessage.includes('Provider')) {
@@ -355,7 +698,7 @@ app.post('/api/chat', async (req, res) => {
           }
         } else if (errorCode === 401 || errorCode === 403) {
           if (errorMessage.includes('User not found') || errorMessage.includes('user not found') || errorMessage.includes('Invalid API key')) {
-            displayError = `Authentication error: Your OpenRouter API key is invalid or expired. Please check your API key in server.js. Get a new key at https://openrouter.ai/keys`;
+            displayError = `Authentication error: Your OpenRouter API key is invalid or expired. Please check your API key in .env file. Get a new key at https://openrouter.ai/keys`;
           } else {
             displayError = `Authentication error: ${errorMessage}. Please check your OpenRouter API key.`;
           }
@@ -633,6 +976,35 @@ app.post('/api/chat', async (req, res) => {
       };
     });
 
+    // If judge is disabled, skip judge model and return all responses
+    if (!isJudgeEnabled) {
+      console.log('👤 Judge is DISABLED - returning all responses for manual selection');
+      console.log(`   Returning ${filteredResponses.length} response(s) without judge selection`);
+      const firstAvailable = filteredResponses.find(r => r.response && !r.error) || filteredResponses[0];
+      res.json({
+        judgeDisabled: true,
+        allResponses: filteredResponses,
+        judgeResult: 'Judge disabled: showing all responses for user selection.',
+        personalRag: personalMatches,
+        bestResponse: {
+          index: 0,
+          model: firstAvailable?.model,
+          response: firstAvailable?.response || firstAvailable?.error || 'No response',
+          reason: 'User will choose the preferred answer'
+        },
+        cragInfo: cragInfo ? {
+          enabled: true,
+          documentsRetrieved: cragInfo.documents.length,
+          relevanceScore: cragInfo.evaluation.score,
+          isRelevant: cragInfo.evaluation.isRelevant,
+          corrected: cragInfo.corrected,
+          refinedQuery: cragInfo.refinedQuery
+        } : { enabled: false },
+        personalRag: personalMatches
+      });
+      return;
+    }
+
     // Send all responses to judge model
     const numModels = filteredResponses.length;
     const hipaaJudgeNote = hipaaEnabled ? '\n\nIMPORTANT: When evaluating responses, prioritize those that do NOT contain any PHI (Protected Health Information) or PII (Personally Identifiable Information). Responses containing names, addresses, phone numbers, email addresses, SSN, dates of birth, or other identifying information should be penalized.' : '';
@@ -681,8 +1053,8 @@ Please respond with ONLY the number (1-${numModels}) of the best response, follo
       
       // If it's an authentication error, provide helpful message
       if (judgeErrorMessage.includes('User not found') || judgeErrorMessage.includes('user not found') || judgeErrorMessage.includes('Invalid API key')) {
-        console.error('⚠️  OpenRouter API key authentication failed. Please check your API key in server.js');
-        judgeResult = `Judge model authentication error: Your OpenRouter API key is invalid or expired. Please check your API key in server.js. Get a new key at https://openrouter.ai/keys. Selected first available response.`;
+        console.error('⚠️  OpenRouter API key authentication failed. Please check your API key in .env file');
+        judgeResult = `Judge model authentication error: Your OpenRouter API key is invalid or expired. Please check your API key in .env file. Get a new key at https://openrouter.ai/keys. Selected first available response.`;
       }
     }
     
@@ -699,12 +1071,21 @@ Please respond with ONLY the number (1-${numModels}) of the best response, follo
     res.json({
       allResponses: filteredResponses,
       judgeResult: filterPHI(judgeResult),
+      personalRag: personalMatches,
       bestResponse: {
         index: bestIndex,
         model: filteredResponses[bestIndex].model,
         response: filteredResponses[bestIndex].response || filteredResponses[bestIndex].error,
         reason: filterPHI(reason)
-      }
+      },
+      cragInfo: cragInfo ? {
+        enabled: true,
+        documentsRetrieved: cragInfo.documents.length,
+        relevanceScore: cragInfo.evaluation.score,
+        isRelevant: cragInfo.evaluation.isRelevant,
+        corrected: cragInfo.corrected,
+        refinedQuery: cragInfo.refinedQuery
+      } : { enabled: false }
     });
 
   } catch (error) {
@@ -737,7 +1118,7 @@ app.get('/api/models', async (req, res) => {
     // Check for authentication errors
     if (errorMessage.includes('User not found') || errorMessage.includes('user not found') || errorMessage.includes('Invalid API key') || errorCode === 401 || errorCode === 403) {
       res.status(401).json({ 
-        error: 'Authentication failed: Your OpenRouter API key is invalid or expired. Please check your API key in server.js. Get a new key at https://openrouter.ai/keys',
+        error: 'Authentication failed: Your OpenRouter API key is invalid or expired. Please check your API key in .env file. Get a new key at https://openrouter.ai/keys',
         details: errorMessage
       });
     } else {
@@ -1032,7 +1413,142 @@ app.post('/api/export/pdf', (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// ============================================================================
+// CRAG Document Management Endpoints
+// ============================================================================
+
+// Store a document in the knowledge base
+app.post('/api/crag/store', async (req, res) => {
+  try {
+    const { text, metadata } = req.body;
+    
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    const docId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    await cragService.storeDocument(docId, text, metadata || {});
+    
+    res.json({ 
+      success: true, 
+      docId,
+      message: 'Document stored successfully'
+    });
+  } catch (error) {
+    console.error('Error storing document:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Provide more detailed error message
+    let errorMessage = error.message || 'Failed to store document';
+    if (error.response) {
+      errorMessage = error.response.data?.error?.message || 
+                     error.response.data?.message || 
+                     errorMessage;
+      console.error('API Error Response:', error.response.data);
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to store document', 
+      details: errorMessage,
+      message: errorMessage
+    });
+  }
+});
+
+// Get all stored documents
+app.get('/api/crag/documents', async (req, res) => {
+  try {
+    const documents = await cragService.getAllDocuments();
+    const count = await cragService.getDocumentCount();
+    
+    res.json({
+      success: true,
+      count,
+      documents
+    });
+  } catch (error) {
+    console.error('Error getting documents:', error);
+    res.status(500).json({ error: 'Failed to get documents', details: error.message });
+  }
+});
+
+// Delete a document
+app.delete('/api/crag/documents/:docId', async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const deleted = await cragService.deleteDocument(docId);
+    
+    if (deleted) {
+      res.json({ success: true, message: 'Document deleted successfully' });
+    } else {
+      res.status(404).json({ error: 'Document not found' });
+    }
+  } catch (error) {
+    console.error('Error deleting document:', error);
+    res.status(500).json({ error: 'Failed to delete document', details: error.message });
+  }
+});
+
+// Clear all documents
+app.delete('/api/crag/documents', async (req, res) => {
+  try {
+    const result = await cragService.clearAllDocuments();
+    res.json(result);
+  } catch (error) {
+    console.error('Error clearing documents:', error);
+    res.status(500).json({ error: 'Failed to clear documents', details: error.message });
+  }
+});
+
+// Get document count
+app.get('/api/crag/count', async (req, res) => {
+  try {
+    const count = await cragService.getDocumentCount();
+    res.json({ success: true, count });
+  } catch (error) {
+    console.error('Error getting document count:', error);
+    res.status(500).json({ error: 'Failed to get document count', details: error.message });
+  }
+});
+
+// Verify embedding format for a document
+app.get('/api/crag/verify-embedding/:docId', async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const mongoService = await import('./mongodbService.js');
+    const verification = await mongoService.verifyEmbeddingFormat(docId);
+    res.json(verification);
+  } catch (error) {
+    console.error('Error verifying embedding:', error);
+    res.status(500).json({ error: 'Failed to verify embedding', details: error.message });
+  }
+});
+
+app.listen(PORT, async () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`CRAG endpoints available at /api/crag/*`);
+  
+  // Initialize MongoDB connection
+  try {
+    const mongoService = await import('./mongodbService.js');
+    await mongoService.connectToMongoDB();
+    await mongoService.createIndexes();
+    console.log('✅ MongoDB connected and ready');
+  } catch (error) {
+    console.error('⚠️  MongoDB connection failed:', error.message);
+    console.error('   CRAG will use in-memory storage (data will be lost on restart)');
+  }
+  
+  // Graceful shutdown
+  process.on('SIGINT', async () => {
+    console.log('\nShutting down gracefully...');
+    try {
+      const mongoService = await import('./mongodbService.js');
+      await mongoService.closeMongoDBConnection();
+    } catch (error) {
+      console.error('Error closing MongoDB connection:', error);
+    }
+    process.exit(0);
+  });
 });
 

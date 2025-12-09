@@ -104,7 +104,7 @@ function InputArea({
           })}
           {selectedFiles.map((file, idx) => (
             <div key={idx} className="attachment-item file">
-              <span className="file-icon">📄</span>
+              <span className="file-icon">File</span>
               <span className="file-name">{file.name}</span>
               <button 
                 className="remove-attachment"

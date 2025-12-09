@@ -1,4 +1,6 @@
+import { useState, useEffect, useRef } from 'react'
 import './ModelSelector.css'
+import KnowledgeBase from './KnowledgeBase'
 
 function ModelSelector({ 
   availableModels, 
@@ -8,8 +10,15 @@ function ModelSelector({
   onJudgeModelChange,
   isLoading,
   hipaaEnabled,
-  onHipaaToggle
+  onHipaaToggle,
+  cragEnabled,
+  onCragToggle,
+  judgeEnabled,
+  onJudgeToggle
 }) {
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const dropdownRef = useRef(null)
+
   const popularModels = [
     'nvidia/nemotron-nano-12b-v2-vl:free',
     'google/gemma-3-4b-it:free',
@@ -33,7 +42,35 @@ function ModelSelector({
     ? availableModels.filter(m => popularModels.includes(m.id))
     : popularModels.map(id => ({ id, name: id }))
 
-  const progressPercentage = Math.min((selectedModels.length / 10) * 100, 100) // Show progress up to 10 models
+  const progressPercentage = Math.min((selectedModels.length / 3) * 100, 100)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false)
+      }
+    }
+
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isDropdownOpen])
+
+  const getSelectedModelsText = () => {
+    if (selectedModels.length === 0) {
+      return 'Select models (max 3)'
+    }
+    if (selectedModels.length === 1) {
+      const formatted = formatModelName(selectedModels[0])
+      return `${formatted.provider} - ${formatted.model || selectedModels[0]}`
+    }
+    return `${selectedModels.length} models selected`
+  }
 
   return (
     <div className="model-selector">
@@ -50,44 +87,50 @@ function ModelSelector({
             </div>
           </div>
         </div>
-        <div className="model-list">
-          {isLoading ? (
-            <div className="loading">
-              <div className="loading-spinner"></div>
-              <span>Loading models...</span>
+        <div className="model-dropdown-wrapper" ref={dropdownRef}>
+          <button
+            className="model-dropdown-button"
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            disabled={isLoading}
+          >
+            <span className="dropdown-text">{isLoading ? 'Loading models...' : getSelectedModelsText()}</span>
+            <span className={`dropdown-arrow ${isDropdownOpen ? 'open' : ''}`}>▼</span>
+          </button>
+          {isDropdownOpen && !isLoading && (
+            <div className="model-dropdown-menu">
+              {displayModels.map(model => {
+                const isSelected = selectedModels.includes(model.id)
+                const isDisabled = !isSelected && selectedModels.length >= 3
+                const formatted = formatModelName(model.id)
+                
+                return (
+                  <div
+                    key={model.id}
+                    className={`model-dropdown-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
+                    onClick={() => {
+                      if (!isDisabled) {
+                        onModelToggle(model.id)
+                      }
+                    }}
+                  >
+                    <div className="checkbox-wrapper">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        disabled={isDisabled}
+                        className="model-checkbox"
+                      />
+                      <span className="checkmark"></span>
+                    </div>
+                    <div className="model-info">
+                      <span className="model-provider">{formatted.provider}</span>
+                      <span className="model-name">{formatted.model || model.id}</span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          ) : (
-            displayModels.map(model => {
-              const isSelected = selectedModels.includes(model.id)
-              const isDisabled = false // Allow unlimited model selection
-              const formatted = formatModelName(model.id)
-              
-              return (
-                <div
-                  key={model.id}
-                  className={`model-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
-                  onClick={() => !isDisabled && onModelToggle(model.id)}
-                >
-                  <div className="checkbox-wrapper">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => {}}
-                      disabled={isDisabled}
-                      className="model-checkbox"
-                    />
-                    <span className="checkmark"></span>
-                  </div>
-                  <div className="model-info">
-                    <span className="model-provider">{formatted.provider}</span>
-                    <span className="model-name">{formatted.model || model.id}</span>
-                  </div>
-                  {isSelected && (
-                    <span className="selected-badge">✓</span>
-                  )}
-                </div>
-              )
-            })
           )}
         </div>
       </div>
@@ -97,22 +140,39 @@ function ModelSelector({
           <h3>Judge Model</h3>
           <span className="section-subtitle">Evaluates all responses</span>
         </div>
-        <div className="judge-select-wrapper">
-          <select 
-            value={judgeModel} 
-            onChange={(e) => onJudgeModelChange(e.target.value)}
-            className="judge-select"
-          >
-            {displayModels.map(model => {
-              const formatted = formatModelName(model.id)
-              return (
-                <option key={model.id} value={model.id}>
-                  {formatted.provider} - {formatted.model || model.id}
-                </option>
-              )
-            })}
-          </select>
+        <div className="hipaa-toggle-wrapper" style={{ marginBottom: '8px' }}>
+          <label className="hipaa-toggle-label">
+            <input
+              type="checkbox"
+              checked={judgeEnabled}
+              onChange={(e) => onJudgeToggle(e.target.checked)}
+              className="hipaa-toggle-input"
+            />
+            <span className="hipaa-toggle-slider"></span>
+            <span className="hipaa-toggle-text">Auto-select best (Judge)</span>
+          </label>
+          {!judgeEnabled && (
+            <span className="hipaa-description">Showing all answers; you choose</span>
+          )}
         </div>
+        {judgeEnabled ? (
+          <div className="judge-select-wrapper">
+            <select 
+              value={judgeModel} 
+              onChange={(e) => onJudgeModelChange(e.target.value)}
+              className="judge-select"
+            >
+              {displayModels.map(model => {
+                const formatted = formatModelName(model.id)
+                return (
+                  <option key={model.id} value={model.id}>
+                    {formatted.provider} - {formatted.model || model.id}
+                  </option>
+                )
+              })}
+            </select>
+          </div>
+        ) : null}
         
         <div className="hipaa-toggle-wrapper">
           <label className="hipaa-toggle-label">
@@ -129,7 +189,30 @@ function ModelSelector({
             <span className="hipaa-description">PHI/PII filtering enabled</span>
           )}
         </div>
+
+        <div className="hipaa-toggle-wrapper">
+          <label className="hipaa-toggle-label">
+            <input
+              type="checkbox"
+              checked={cragEnabled}
+              onChange={(e) => onCragToggle(e.target.checked)}
+              className="hipaa-toggle-input"
+            />
+            <span className="hipaa-toggle-slider"></span>
+            <span className="hipaa-toggle-text">CRAG</span>
+          </label>
+          {cragEnabled && (
+            <span className="hipaa-description">Retrieval Augmented Generation active</span>
+          )}
+        </div>
       </div>
+
+      {cragEnabled && (
+        <KnowledgeBase 
+          cragEnabled={cragEnabled}
+          onCragToggle={onCragToggle}
+        />
+      )}
     </div>
   )
 }

@@ -1,0 +1,378 @@
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal {
+  background: #0f172a;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 12px;
+  padding: 16px;
+  width: 420px;
+  color: #e5e7eb;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.modal.large {
+  width: 700px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.settings-modal {
+  width: 800px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+  margin-bottom: 20px;
+}
+
+.settings-tab {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.settings-tab:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.settings-tab.active {
+  color: #ffffff;
+  border-bottom-color: #3b82f6;
+}
+
+.settings-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-section h4 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0;
+  margin-bottom: 8px;
+}
+
+.section-description {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.settings-divider {
+  height: 1px;
+  background: rgba(59, 130, 246, 0.2);
+  margin: 20px 0;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.personalization-section {
+  margin-bottom: 24px;
+}
+
+.style-select {
+  width: 100%;
+  background: #111827;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 10px;
+  color: #e5e7eb;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.style-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.style-options {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.style-option-item {
+  display: flex;
+  align-items: center;
+}
+
+.style-dropdown-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.style-option-name {
+  min-width: 120px;
+  font-weight: 500;
+}
+
+.style-dropdown {
+  flex: 1;
+  max-width: 300px;
+  background: #111827;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #e5e7eb;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.style-dropdown:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.memory-toggle-wrapper {
+  margin-bottom: 16px;
+}
+
+.memory-toggle-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.memory-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.memory-toggle-slider {
+  position: relative;
+  width: 48px;
+  height: 24px;
+  background-color: rgba(59, 130, 246, 0.2);
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.memory-toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.6);
+  top: 1px;
+  left: 1px;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.memory-toggle-input:checked + .memory-toggle-slider {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #8a2be2 100%);
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+}
+
+.memory-toggle-input:checked + .memory-toggle-slider::before {
+  transform: translateX(24px);
+  background-color: white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.memory-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.memory-toggle-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.memory-toggle-description {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.4;
+}
+
+.memory-info-text {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+.link-text {
+  color: #60a5fa;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.link-text:hover {
+  text-decoration: underline;
+}
+
+.manage-memories-modal {
+  width: 600px;
+  max-height: 70vh;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-body input,
+.modal-body textarea {
+  width: 100%;
+  background: #111827;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 10px;
+  color: #e5e7eb;
+}
+
+.modal-body label {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  border: none;
+  color: white;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.modal-footer {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #60a5fa;
+  cursor: pointer;
+  padding: 0;
+}
+
+.muted {
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.summary-card {
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  padding: 12px;
+  background: #0b1224;
+}
+
+.summary-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.summary-date {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 6px;
+}
+
+.summary-content {
+  font-size: 14px;
+  color: #e5e7eb;
+  white-space: pre-wrap;
+}
+
+.small-button {
+  background: rgba(59, 130, 246, 0.2);
+  color: #e5e7eb;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import './MessageList.css'
 
-function MessageList({ messages, isLoading, messagesEndRef }) {
+function MessageList({ messages, isLoading, messagesEndRef, onSelectResponse }) {
   const [expandedMessage, setExpandedMessage] = useState(null)
 
   if (messages.length === 0) {
@@ -27,6 +27,7 @@ function MessageList({ messages, isLoading, messagesEndRef }) {
           onToggleExpand={() => setExpandedMessage(
             expandedMessage === message.id ? null : message.id
           )}
+          onSelectResponse={onSelectResponse}
         />
       ))}
       {isLoading && (
@@ -45,7 +46,7 @@ function MessageList({ messages, isLoading, messagesEndRef }) {
   )
 }
 
-function Message({ message, isExpanded, onToggleExpand }) {
+function Message({ message, isExpanded, onToggleExpand, onSelectResponse }) {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef(null);
 
@@ -131,7 +132,7 @@ function Message({ message, isExpanded, onToggleExpand }) {
             <div className="file-list">
               {Array.from(message.files).map((file, idx) => (
                 <div key={idx} className="file-item">
-                  📄 {file.name}
+                  {file.name}
                 </div>
               ))}
             </div>
@@ -145,7 +146,8 @@ function Message({ message, isExpanded, onToggleExpand }) {
     <div className={`message assistant ${message.isError ? 'error' : ''}`}>
       <div className="message-content">
         <div className="message-header-actions">
-          {message.model && (
+          {/* Only show model badge when judge is enabled (single selected response) */}
+          {!message.judgeDisabled && message.model && (
             <div className="model-badge">
               {message.model}
             </div>
@@ -184,9 +186,35 @@ function Message({ message, isExpanded, onToggleExpand }) {
             )}
           </div>
         </div>
-        <div className="message-text">
-          <ReactMarkdown>{message.content}</ReactMarkdown>
-        </div>
+        {/* When judge is disabled, show all responses horizontally side by side */}
+        {message.judgeDisabled && message.allResponses && message.allResponses.length > 0 ? (
+          <div className="all-responses-grid">
+            <div className="all-responses-header">
+              <strong>{message.allResponses.length} model response(s):</strong>
+            </div>
+            <div className="all-responses-list horizontal">
+              {message.allResponses.map((resp, idx) => (
+                <div 
+                  key={idx} 
+                  className="response-card"
+                >
+                  <div className="response-card-model">
+                    {resp.model || `Response ${idx + 1}`}
+                  </div>
+                  <div className="response-card-content">
+                    <ReactMarkdown>{resp.response || resp.error || 'No response'}</ReactMarkdown>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="message-text">
+              <ReactMarkdown>{message.content}</ReactMarkdown>
+            </div>
+          </>
+        )}
         {message.documentData && !message.isError && (
           <div className="document-download-section">
             <a
@@ -209,15 +237,47 @@ function Message({ message, isExpanded, onToggleExpand }) {
             </a>
           </div>
         )}
-        {message.reason && (
+        {message.cragInfo && message.cragInfo.enabled && (
+          <div className="crag-info" style={{
+            marginTop: '10px',
+            padding: '8px 12px',
+            background: '#f0f9ff',
+            border: '1px solid #3b82f6',
+            borderRadius: '6px',
+            fontSize: '12px'
+          }}>
+            <strong>🔍 CRAG Retrieval:</strong>
+            <div style={{ marginTop: '4px' }}>
+              {message.cragInfo.documentsRetrieved > 0 ? (
+                <>
+                  Retrieved {message.cragInfo.documentsRetrieved} document(s) from knowledge base
+                  {message.cragInfo.relevanceScore !== undefined && (
+                    <span style={{ marginLeft: '8px', color: message.cragInfo.isRelevant ? '#10b981' : '#f59e0b' }}>
+                      (Relevance: {(message.cragInfo.relevanceScore * 100).toFixed(1)}%)
+                    </span>
+                  )}
+                  {message.cragInfo.corrected && message.cragInfo.refinedQuery && (
+                    <div style={{ marginTop: '4px', fontSize: '11px', color: '#666' }}>
+                      Query refined: "{message.cragInfo.refinedQuery}"
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span style={{ color: '#f59e0b' }}>No documents found in knowledge base</span>
+              )}
+            </div>
+          </div>
+        )}
+        {/* Only show "Why this response was selected" when judge is enabled */}
+        {!message.judgeDisabled && message.reason && (
           <button 
             className="expand-button"
             onClick={onToggleExpand}
           >
-            {isExpanded ? '▼' : '▶'} Why this response was selected
+            {isExpanded ? 'Hide' : 'Show'} Why this response was selected
           </button>
         )}
-        {isExpanded && message.allResponses && (
+        {!message.judgeDisabled && isExpanded && message.allResponses && (
           <div className="expanded-details">
             <div className="reason-section">
               <strong>Judge's Reasoning:</strong>
