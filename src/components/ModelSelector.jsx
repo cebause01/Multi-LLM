@@ -113,16 +113,6 @@ function ModelSelector({
                       }
                     }}
                   >
-                    <div className="checkbox-wrapper">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => {}}
-                        disabled={isDisabled}
-                        className="model-checkbox"
-                      />
-                      <span className="checkmark"></span>
-                    </div>
                     <div className="model-info">
                       <span className="model-provider">{formatted.provider}</span>
                       <span className="model-name">{formatted.model || model.id}</span>

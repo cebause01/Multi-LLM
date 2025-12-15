@@ -1237,9 +1237,18 @@ app.post('/api/export/pdf', (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${title.replace(/[^a-z0-9]/gi, '_')}.pdf"`);
     
+    // Check if this is a single document (not a conversation export)
+    const isSingleDocument = messages.length === 1 && messages[0].role === 'assistant';
+    
     doc = new PDFDocument({ 
-      margin: 50,
-      size: 'LETTER'
+      margin: isSingleDocument ? 72 : 50, // Larger margins for single documents (1 inch)
+      size: 'LETTER',
+      info: {
+        Title: title || 'AI Generated Document',
+        Author: 'AI Assistant',
+        Subject: isSingleDocument ? 'Generated Content' : 'Chat Export',
+        Creator: 'Multi-LLM Chat Application'
+      }
     });
     
     // Handle errors during PDF generation
@@ -1262,26 +1271,42 @@ app.post('/api/export/pdf', (req, res) => {
     // Title - sanitize to prevent PDF errors
     const sanitizedTitle = String(title || 'AI Generated Document').substring(0, 100);
     try {
-      doc.fontSize(24)
+      // Professional title formatting
+      doc.fontSize(28)
          .fillColor('#1a1a1a')
          .font('Helvetica-Bold')
-         .text(sanitizedTitle, { align: 'center' });
-      doc.moveDown(1);
-      doc.fontSize(10)
+         .text(sanitizedTitle, { 
+           align: 'center',
+           lineGap: 2
+         });
+      doc.moveDown(1.5);
+      doc.fontSize(11)
          .fillColor('#666666')
          .font('Helvetica')
-         .text(`Generated on ${new Date().toLocaleDateString()}`, { align: 'center' });
+         .text(`Generated on ${new Date().toLocaleDateString('en-US', { 
+           year: 'numeric', 
+           month: 'long', 
+           day: 'numeric' 
+         })}`, { align: 'center' });
+      doc.moveDown(3);
+      
+      // Add a subtle divider line (adjust based on margins)
+      const dividerStart = isSingleDocument ? 72 : 50;
+      const dividerEnd = isSingleDocument ? 540 : 550;
+      doc.strokeColor('#e0e0e0')
+         .lineWidth(0.5)
+         .moveTo(dividerStart, doc.y)
+         .lineTo(dividerEnd, doc.y)
+         .stroke();
       doc.moveDown(2);
     } catch (titleError) {
       console.error('Error adding title to PDF:', titleError);
-      doc.fontSize(20).text('AI Generated Document', { align: 'center' });
+      doc.fontSize(24).text('AI Generated Document', { align: 'center' });
       doc.moveDown(2);
     }
 
     try {
-      // Check if this is a single document (not a conversation export)
-      const isSingleDocument = messages.length === 1 && messages[0].role === 'assistant';
-      
+      // isSingleDocument is already defined above
       messages.forEach((msg, index) => {
         // Only show role header if there are multiple messages (conversation export)
         if (!isSingleDocument && messages.length > 1) {
@@ -1314,15 +1339,96 @@ app.post('/api/export/pdf', (req, res) => {
             .replace(/^\s*\d+\.\s+/gm, '') // Numbered lists
             .trim();
           
-          // For single documents, remove any remaining disclaimers or meta-commentary
+          // For single documents, aggressively remove any remaining disclaimers or meta-commentary
           if (isSingleDocument) {
-            // Remove common patterns that might have slipped through
-            cleanContent = cleanContent
-              .replace(/^(?:Your\s+(?:story|document|content)\s+is\s+ready!?[\.!]?\s*)/i, '')
-              .replace(/(?:You\s+can\s+download.*?$)/gi, '')
-              .replace(/(?:👉\s*)?(?:Download.*?\.(?:pdf|docx).*?$)/gi, '')
-              .replace(/\n{3,}/g, '\n\n')
-              .trim();
+            // Remove pre-story commentary
+            cleanContent = cleanContent.replace(/^(?:Okay,?\s+[A-Z][a-z]+\.?\s+)?(?:Let'?s?\s+get\s+this\s+over\s+with[\.!]?\s*)/i, '');
+            cleanContent = cleanContent.replace(/^(?:Alright,?\s+[A-Z][a-z]+\.?\s*)/i, '');
+            cleanContent = cleanContent.replace(/^(?:Fine,?\s+[A-Z][a-z]+\.?\s*)/i, '');
+            cleanContent = cleanContent.replace(/^(?:You\s+specifically\s+requested[^\.]+\.\s*)/i, '');
+            cleanContent = cleanContent.replace(/^(?:I'?m\s+going\s+to\s+provide[^\.]+\.\s*)/i, '');
+            cleanContent = cleanContent.replace(/^(?:Don'?t\s+expect[^\.]+\.\s*)/i, '');
+            cleanContent = cleanContent.replace(/^(?:This\s+is\s+purely\s+fulfilling[^\.]+\.\s*)/i, '');
+            
+            // Remove everything from "How to Save this as a PDF:" onwards
+            const howToSaveIndex = cleanContent.search(/How\s+to\s+(?:Save|Download|Export|Get)\s+(?:this\s+as\s+a\s+)?(?:PDF|DOCX|document|file)/i);
+            if (howToSaveIndex !== -1) {
+              cleanContent = cleanContent.substring(0, howToSaveIndex).trim();
+            }
+            
+            // Remove closing remarks
+            cleanContent = cleanContent.replace(/(?:There\.?\s+It'?s?\s+done[\.!]?\s*)/gi, '');
+            cleanContent = cleanContent.replace(/(?:Don'?t\s+expect\s+(?:a\s+)?(?:thank\s+you|gratitude)[\.!]?\s*)/gi, '');
+            cleanContent = cleanContent.replace(/(?:I'?ve?\s+fulfilled\s+your\s+request[\.!]?\s*)/gi, '');
+            cleanContent = cleanContent.replace(/(?:Now,?\s+if\s+you'?ll?\s+excuse\s+me[^\.]+\.\s*)/gi, '');
+            cleanContent = cleanContent.replace(/(?:Do\s+you\s+require\s+anything\s+else[^?]*\?)/gi, '');
+            cleanContent = cleanContent.replace(/(?:Perhaps\s+[^?]+\?)/gi, '');
+            cleanContent = cleanContent.replace(/(?:Don'?t\s+waste\s+my\s+time[\.!]?\s*)/gi, '');
+            
+            // Comprehensive removal of meta-commentary
+            const metaPatterns = [
+              /^(?:Your\s+(?:story|document|content|text|essay|report|article|blog|post)\s+is\s+ready!?[\.!]?\s*)/i,
+              /(?:You\s+can\s+(?:now\s+)?(?:download|save|export)\s+(?:the\s+)?(?:PDF|DOCX|document|file|story|content)\s+(?:here|below|above|now)[\.:]?\s*)/i,
+              /(?:Here'?s?\s+(?:the\s+)?(?:story|document|content|essay|report|article|blog|post|text)[:\.]?\s*)/i,
+              /(?:👉\s*)?(?:Download\s+(?:link\s+)?(?:will\s+)?(?:appear\s+)?(?:below|here|above)|\[Download\s+link\s+will\s+appear\s+below\]|Download\s+.*?\.(?:pdf|docx|word))/gi,
+              /^(?:I'?ve?\s+(?:created|generated|written|prepared|made)\s+(?:a\s+)?(?:story|document|content|essay|report|article|blog|post|text)[:\.]?\s*)/i,
+              /^(?:I'?ve?\s+(?:written|composed|crafted)\s+(?:a\s+)?(?:story|document|content|essay|report|article|blog|post|text)[:\.]?\s*)/i,
+              /(?:Disclaimer|Note|Important|Please\s+note)[:\.]?\s*(?:I\s+am\s+an\s+AI|This\s+is\s+generated|Please\s+note|This\s+content)[^\.]*\./gi,
+              /Feel\s+free\s+to\s+(?:download|save|export).*$/gi,
+              /^(?:The\s+(?:document|file|story|content)\s+is\s+ready[\.!]?\s*)/i,
+              /(?:Click\s+(?:the\s+)?(?:download|save)\s+(?:button|link).*?$)/gi,
+              /(?:You'?ll?\s+find\s+(?:the\s+)?(?:download|file|document).*?$)/gi,
+            ];
+            
+            metaPatterns.forEach(pattern => {
+              cleanContent = cleanContent.replace(pattern, '');
+            });
+            
+            // Remove lines with download instructions and meta-commentary
+            const lines = cleanContent.split('\n');
+            const filteredLines = lines.filter(line => {
+              const lowerLine = line.toLowerCase().trim();
+              return !(
+                (lowerLine.includes('download') && (lowerLine.includes('pdf') || lowerLine.includes('docx') || lowerLine.includes('here') || lowerLine.includes('below') || lowerLine.includes('button') || lowerLine.includes('link'))) ||
+                lowerLine.includes('your story is ready') ||
+                lowerLine.includes('document is ready') ||
+                lowerLine.includes('file is ready') ||
+                lowerLine.includes('you can download') ||
+                lowerLine.includes('you can save') ||
+                lowerLine.includes('you can export') ||
+                lowerLine.includes('copy the text') ||
+                lowerLine.includes('paste into') ||
+                lowerLine.includes('copy and paste') ||
+                lowerLine.includes('select all') ||
+                lowerLine.includes('highlight the') ||
+                lowerLine.includes('press ctrl') ||
+                lowerLine.includes('press cmd') ||
+                lowerLine.includes('open a document') ||
+                lowerLine.includes('use microsoft word') ||
+                lowerLine.includes('use google docs') ||
+                lowerLine.includes('go to file') ||
+                lowerLine.includes('save as') ||
+                lowerLine.includes('file >') ||
+                lowerLine.includes('export as') ||
+                lowerLine.startsWith('👉') ||
+                lowerLine.startsWith('📄') ||
+                lowerLine.startsWith('📥') ||
+                lowerLine.match(/^download\s+.*?\.(pdf|docx|word)/i) ||
+                lowerLine.match(/^click\s+.*?download/i) ||
+                lowerLine.match(/^(?:okay|alright|fine),?\s+[a-z]+\.?\s+let'?s?\s+get/i) ||
+                lowerLine.includes("let's get this over with") ||
+                lowerLine.includes('you specifically requested') ||
+                lowerLine.includes("i'm going to provide") ||
+                lowerLine.includes("don't expect") ||
+                lowerLine.includes('this is purely fulfilling') ||
+                lowerLine.match(/^(?:there\.?\s+it'?s?\s+done|don'?t\s+expect|i'?ve?\s+fulfilled|now,?\s+if\s+you'?ll?\s+excuse|do\s+you\s+require|perhaps|don'?t\s+waste\s+my\s+time)/i)
+              );
+            });
+            
+            cleanContent = filteredLines.join('\n').trim();
+            
+            // Remove leading/trailing empty lines
+            cleanContent = cleanContent.replace(/^\n+|\n+$/g, '');
           }
           
           // Ensure content is not empty
@@ -1331,15 +1437,33 @@ app.post('/api/export/pdf', (req, res) => {
           }
           
           try {
-            doc.fontSize(12)
-               .fillColor('#1a1a1a')
-               .font('Helvetica')
-               .text(cleanContent, { 
-                 align: 'left',
-                 width: 500,
-                 lineGap: 4,
-                 paragraphGap: 8
-               });
+            // Professional text formatting for single documents
+            if (isSingleDocument) {
+              // Calculate width based on page size and margins (LETTER = 612pt width, 72pt margins each side)
+              const textWidth = 612 - (72 * 2); // 468pt width for content
+              doc.fontSize(13)
+                 .fillColor('#1a1a1a')
+                 .font('Helvetica')
+                 .text(cleanContent, { 
+                   align: 'left',
+                   width: textWidth,
+                   lineGap: 5,
+                   paragraphGap: 12,
+                   indent: 0,
+                   ellipsis: false
+                 });
+            } else {
+              // Conversation export formatting
+              doc.fontSize(12)
+                 .fillColor('#1a1a1a')
+                 .font('Helvetica')
+                 .text(cleanContent, { 
+                   align: 'left',
+                   width: 500,
+                   lineGap: 4,
+                   paragraphGap: 8
+                 });
+            }
           } catch (textError) {
             console.error('Error adding text to PDF:', textError);
             doc.fontSize(11)
@@ -1374,10 +1498,12 @@ app.post('/api/export/pdf', (req, res) => {
 
           if (index < messages.length - 1) {
             doc.moveDown(1.5);
+            const dividerStart = isSingleDocument ? 72 : 50;
+            const dividerEnd = isSingleDocument ? 540 : 550;
             doc.strokeColor('#e0e0e0')
                .lineWidth(1)
-               .moveTo(50, doc.y)
-               .lineTo(550, doc.y)
+               .moveTo(dividerStart, doc.y)
+               .lineTo(dividerEnd, doc.y)
                .stroke();
             doc.moveDown(1.5);
           }
@@ -1524,7 +1650,7 @@ app.get('/api/crag/verify-embedding/:docId', async (req, res) => {
   }
 });
 
-app.listen(PORT, async () => {
+app.listen(PORT, '127.0.0.1', async () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`CRAG endpoints available at /api/crag/*`);
   

@@ -240,11 +240,12 @@ function Message({ message, isExpanded, onToggleExpand, onSelectResponse }) {
         {message.cragInfo && message.cragInfo.enabled && (
           <div className="crag-info" style={{
             marginTop: '10px',
-            padding: '8px 12px',
-            background: '#f0f9ff',
-            border: '1px solid #3b82f6',
-            borderRadius: '6px',
-            fontSize: '12px'
+            padding: '10px 12px',
+            background: 'rgba(59, 130, 246, 0.12)',
+            border: '1px solid rgba(59, 130, 246, 0.5)',
+            borderRadius: '8px',
+            fontSize: '12px',
+            color: '#e5edff'
           }}>
             <strong>🔍 CRAG Retrieval:</strong>
             <div style={{ marginTop: '4px' }}>

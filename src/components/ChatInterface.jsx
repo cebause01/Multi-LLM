@@ -531,22 +531,32 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled, cragEnabled, 
     
     let content = fullResponse;
     
-    // Remove common disclaimers and meta-commentary patterns
+    // Remove common disclaimers and meta-commentary patterns (more comprehensive)
     const patternsToRemove = [
       // "Your story is ready!" type messages
-      /^(?:Your\s+(?:story|document|content|essay|report|article|blog|post)\s+is\s+ready!?[\.!]?\s*)/i,
-      // "You can download..." messages
-      /(?:You\s+can\s+download\s+(?:the\s+)?(?:PDF|DOCX|document|file)\s+(?:here|below|above)[\.:]?\s*)/i,
+      /^(?:Your\s+(?:story|document|content|essay|report|article|blog|post|text)\s+is\s+ready!?[\.!]?\s*)/i,
+      // "You can download..." messages (more variations)
+      /(?:You\s+can\s+(?:now\s+)?(?:download|save|export)\s+(?:the\s+)?(?:PDF|DOCX|document|file|story|content)\s+(?:here|below|above|now)[\.:]?\s*)/i,
       // "Here's the story..." when followed by actual content
-      /^(?:Here'?s?\s+(?:the\s+)?(?:story|document|content|essay|report|article|blog|post)[:\.]?\s*)/i,
-      // Download link placeholders
-      /(?:👉\s*)?(?:Download\s+link\s+will\s+appear\s+below|\[Download\s+link\s+will\s+appear\s+below\]|Download\s+.*?\.(?:pdf|docx))/gi,
+      /^(?:Here'?s?\s+(?:the\s+)?(?:story|document|content|essay|report|article|blog|post|text)[:\.]?\s*)/i,
+      // Download link placeholders (more variations)
+      /(?:👉\s*)?(?:Download\s+(?:link\s+)?(?:will\s+)?(?:appear\s+)?(?:below|here|above)|\[Download\s+link\s+will\s+appear\s+below\]|Download\s+.*?\.(?:pdf|docx|word))/gi,
       // "I've created..." type messages
-      /^(?:I'?ve?\s+(?:created|generated|written|prepared)\s+(?:a\s+)?(?:story|document|content|essay|report|article|blog|post)[:\.]?\s*)/i,
+      /^(?:I'?ve?\s+(?:created|generated|written|prepared|made)\s+(?:a\s+)?(?:story|document|content|essay|report|article|blog|post|text)[:\.]?\s*)/i,
+      // "I've written..." variations
+      /^(?:I'?ve?\s+(?:written|composed|crafted)\s+(?:a\s+)?(?:story|document|content|essay|report|article|blog|post|text)[:\.]?\s*)/i,
       // Disclaimer patterns
-      /(?:Disclaimer|Note|Important)[:\.]?\s*(?:I\s+am\s+an\s+AI|This\s+is\s+generated|Please\s+note)[^\.]*\./gi,
+      /(?:Disclaimer|Note|Important|Please\s+note)[:\.]?\s*(?:I\s+am\s+an\s+AI|This\s+is\s+generated|Please\s+note|This\s+content)[^\.]*\./gi,
       // "How to save..." instructions
-      /How\s+to\s+(?:Save|Download|Export).*$/is,
+      /How\s+to\s+(?:Save|Download|Export|Get).*$/is,
+      // "Feel free to..." download instructions
+      /Feel\s+free\s+to\s+(?:download|save|export).*$/gi,
+      // "The document is ready..." variations
+      /^(?:The\s+(?:document|file|story|content)\s+is\s+ready[\.!]?\s*)/i,
+      // "Click the download button..." type messages
+      /(?:Click\s+(?:the\s+)?(?:download|save)\s+(?:button|link).*?$)/gi,
+      // "You'll find..." download instructions
+      /(?:You'?ll?\s+find\s+(?:the\s+)?(?:download|file|document).*?$)/gi,
     ];
     
     // Remove patterns
@@ -554,21 +564,81 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled, cragEnabled, 
       content = content.replace(pattern, '');
     });
     
+    // Remove pre-story commentary that addresses the user directly
+    // Patterns like "Okay, [Name]. Let's get this over with..." or similar
+    content = content.replace(/^(?:Okay,?\s+[A-Z][a-z]+\.?\s+)?(?:Let'?s?\s+get\s+this\s+over\s+with[\.!]?\s*)/i, '');
+    content = content.replace(/^(?:Alright,?\s+[A-Z][a-z]+\.?\s*)/i, '');
+    content = content.replace(/^(?:Fine,?\s+[A-Z][a-z]+\.?\s*)/i, '');
+    content = content.replace(/^(?:You\s+specifically\s+requested[^\.]+\.\s*)/i, '');
+    content = content.replace(/^(?:I'?m\s+going\s+to\s+provide[^\.]+\.\s*)/i, '');
+    content = content.replace(/^(?:Don'?t\s+expect[^\.]+\.\s*)/i, '');
+    content = content.replace(/^(?:This\s+is\s+purely\s+fulfilling[^\.]+\.\s*)/i, '');
+    
+    // Remove everything from "How to Save this as a PDF:" onwards
+    const howToSaveIndex = content.search(/How\s+to\s+(?:Save|Download|Export|Get)\s+(?:this\s+as\s+a\s+)?(?:PDF|DOCX|document|file)/i);
+    if (howToSaveIndex !== -1) {
+      content = content.substring(0, howToSaveIndex).trim();
+    }
+    
+    // Remove closing remarks like "There. It's done." or "Don't expect a thank you"
+    content = content.replace(/(?:There\.?\s+It'?s?\s+done[\.!]?\s*)/gi, '');
+    content = content.replace(/(?:Don'?t\s+expect\s+(?:a\s+)?(?:thank\s+you|gratitude)[\.!]?\s*)/gi, '');
+    content = content.replace(/(?:I'?ve?\s+fulfilled\s+your\s+request[\.!]?\s*)/gi, '');
+    content = content.replace(/(?:Now,?\s+if\s+you'?ll?\s+excuse\s+me[^\.]+\.\s*)/gi, '');
+    content = content.replace(/(?:Do\s+you\s+require\s+anything\s+else[^?]*\?)/gi, '');
+    content = content.replace(/(?:Perhaps\s+[^?]+\?)/gi, '');
+    content = content.replace(/(?:Don'?t\s+waste\s+my\s+time[\.!]?\s*)/gi, '');
+    
     // Remove lines that are clearly meta-commentary (download instructions, etc.)
     const lines = content.split('\n');
     const filteredLines = lines.filter(line => {
       const lowerLine = line.toLowerCase().trim();
       // Skip lines that are clearly instructions or disclaimers
       if (
-        lowerLine.includes('download') && (lowerLine.includes('pdf') || lowerLine.includes('docx') || lowerLine.includes('here') || lowerLine.includes('below')) ||
+        // Download-related
+        (lowerLine.includes('download') && (lowerLine.includes('pdf') || lowerLine.includes('docx') || lowerLine.includes('here') || lowerLine.includes('below') || lowerLine.includes('button') || lowerLine.includes('link'))) ||
+        // Ready messages
         lowerLine.includes('your story is ready') ||
+        lowerLine.includes('document is ready') ||
+        lowerLine.includes('file is ready') ||
+        // Download instructions
         lowerLine.includes('you can download') ||
+        lowerLine.includes('you can save') ||
+        lowerLine.includes('you can export') ||
+        // Copy/paste instructions
         lowerLine.includes('copy the text') ||
         lowerLine.includes('paste into') ||
+        lowerLine.includes('copy and paste') ||
+        lowerLine.includes('select all') ||
+        lowerLine.includes('highlight the') ||
+        lowerLine.includes('press ctrl') ||
+        lowerLine.includes('press cmd') ||
+        lowerLine.includes('open a document') ||
+        lowerLine.includes('use microsoft word') ||
+        lowerLine.includes('use google docs') ||
+        lowerLine.includes('go to file') ||
+        // Save instructions
         lowerLine.includes('save as') ||
         lowerLine.includes('file >') ||
+        lowerLine.includes('export as') ||
+        // Emoji indicators
         lowerLine.startsWith('👉') ||
-        lowerLine.match(/^download\s+.*?\.(pdf|docx)/i)
+        lowerLine.startsWith('📄') ||
+        lowerLine.startsWith('📥') ||
+        // Download link patterns
+        lowerLine.match(/^download\s+.*?\.(pdf|docx|word)/i) ||
+        lowerLine.match(/^click\s+.*?download/i) ||
+        // Pre-story commentary
+        lowerLine.match(/^(?:okay|alright|fine),?\s+[a-z]+\.?\s+let'?s?\s+get/i) ||
+        lowerLine.includes("let's get this over with") ||
+        lowerLine.includes('you specifically requested') ||
+        lowerLine.includes("i'm going to provide") ||
+        lowerLine.includes("don't expect") ||
+        lowerLine.includes('this is purely fulfilling') ||
+        // Closing remarks
+        lowerLine.match(/^(?:there\.?\s+it'?s?\s+done|don'?t\s+expect|i'?ve?\s+fulfilled|now,?\s+if\s+you'?ll?\s+excuse|do\s+you\s+require|perhaps|don'?t\s+waste\s+my\s+time)/i) ||
+        // Empty or separator lines that are just decorative
+        (lowerLine.length === 0 && lines.indexOf(line) < 3) // Skip leading empty lines
       ) {
         return false;
       }
@@ -577,29 +647,69 @@ function ChatInterface({ selectedModels, judgeModel, hipaaEnabled, cragEnabled, 
     
     content = filteredLines.join('\n').trim();
     
-    // If content starts with common story starters, keep everything after
-    const storyStarters = [
-      /^(?:Once\s+upon\s+a\s+time|In\s+a|The\s+story\s+of|It\s+was|There\s+was|Long\s+ago)/i,
-      /^(?:Chapter\s+\d+|Part\s+\d+)/i,
-      /^[A-Z][a-z]+\s+(?:was|had|lived|worked|studied)/i, // Starts with a name/character
+    // Find where actual content starts by looking for common content patterns
+    const contentStarters = [
+      // Story starters
+      /^(?:Once\s+upon\s+a\s+time|In\s+a|The\s+story\s+of|It\s+was|There\s+was|Long\s+ago|A\s+long\s+time\s+ago)/i,
+      // Chapter/Part markers
+      /^(?:Chapter\s+\d+|Part\s+\d+|Chapter\s+[IVX]+)/i,
+      // Character introductions
+      /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?:was|had|lived|worked|studied|walked|ran|looked|said)/i,
+      // Direct narrative
+      /^(?:The|A|An)\s+[a-z]+\s+(?:was|had|began|started)/i,
+      // Dialogue
+      /^["']/,
+      // Numbered or bulleted content (actual content, not instructions)
+      /^\d+[\.\)]\s+[A-Z]/,
+      /^[-*•]\s+[A-Z]/,
     ];
     
-    // Find where the actual story starts
-    for (const starter of storyStarters) {
-      const match = content.match(starter);
-      if (match) {
-        // Find the position and take everything from there
-        const startPos = content.indexOf(match[0]);
-        if (startPos > 0) {
-          // Remove everything before the story starts
-          content = content.substring(startPos);
+    // Find where the actual content starts
+    let contentStartIndex = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue; // Skip empty lines
+      
+      for (const starter of contentStarters) {
+        if (starter.test(line)) {
+          contentStartIndex = i;
+          break;
+        }
+      }
+      if (contentStartIndex > 0) break;
+      
+      // If we find a line that's clearly content (not meta), start from there
+      if (line.length > 20 && !line.toLowerCase().includes('download') && !line.toLowerCase().includes('ready')) {
+        // Check if it looks like actual content (has proper capitalization, not all caps)
+        if (line[0] === line[0].toUpperCase() && line !== line.toUpperCase()) {
+          contentStartIndex = i;
           break;
         }
       }
     }
     
+    if (contentStartIndex > 0) {
+      content = lines.slice(contentStartIndex).join('\n').trim();
+    }
+    
+    // Final cleanup: remove any remaining meta-commentary at the end
+    const endPatterns = [
+      /(?:You\s+can\s+download.*?$)/gi,
+      /(?:Download\s+.*?$)/gi,
+      /(?:👉.*?$)/gi,
+      /(?:📄.*?$)/gi,
+      /(?:📥.*?$)/gi,
+    ];
+    
+    endPatterns.forEach(pattern => {
+      content = content.replace(pattern, '');
+    });
+    
     // Clean up extra whitespace
     content = content.replace(/\n{3,}/g, '\n\n').trim();
+    
+    // Remove leading/trailing empty lines
+    content = content.replace(/^\n+|\n+$/g, '');
     
     return content || fullResponse; // Fallback to original if extraction fails
   };

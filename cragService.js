@@ -34,6 +34,7 @@ initializeMongoDB().catch(console.error);
 
 // Configuration
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 if (!OPENROUTER_API_KEY) {
   console.error('⚠️  WARNING: OPENROUTER_API_KEY is not set in .env file');
   console.error('   CRAG functionality will not work without an API key');
@@ -48,6 +49,9 @@ const RELEVANCE_THRESHOLD = 0.7;
 
 // Maximum number of documents to retrieve
 const MAX_RETRIEVAL_COUNT = 5;
+
+// Maximum number of web results to fetch from Tavily
+const MAX_WEB_RESULTS = 3;
 
 /**
  * Generate embedding for text using OpenRouter API
@@ -457,6 +461,53 @@ Respond with ONLY the refined query, nothing else:`;
 }
 
 /**
+ * Perform a web search using Tavily when local retrieval is weak.
+ */
+async function webSearchTavily(query, maxResults = MAX_WEB_RESULTS) {
+  if (!TAVILY_API_KEY) {
+    return { documents: [], answer: null, reason: 'TAVILY_API_KEY not set' };
+  }
+
+  try {
+    const response = await axios.post(
+      'https://api.tavily.com/search',
+      {
+        query,
+        max_results: maxResults,
+        search_depth: 'advanced',
+        include_answer: true,
+        include_images: false,
+        include_raw_content: false
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${TAVILY_API_KEY}`
+        },
+        timeout: 15000
+      }
+    );
+
+    const results = response.data?.results || [];
+    const docs = results.map((result, idx) => ({
+      docId: result.url || `tavily-${idx}`,
+      text: `${result.title || 'Untitled'}\n${result.content || ''}\nSource: ${result.url || 'unknown'}`,
+      metadata: {
+        source: 'tavily',
+        url: result.url,
+        title: result.title,
+        score: result.score
+      }
+    }));
+
+    return { documents: docs, answer: response.data?.answer || null, reason: 'tavily_search' };
+  } catch (error) {
+    console.error('Error in Tavily web search:', error?.response?.data || error.message);
+    return { documents: [], answer: null, reason: `tavily_error: ${error.message}` };
+  }
+}
+
+/**
  * Main CRAG function: retrieve, evaluate, and correct if needed
  */
 export async function performCRAG(query, enableCorrection = true) {
@@ -480,12 +531,27 @@ export async function performCRAG(query, enableCorrection = true) {
     let finalDocs = initialDocs;
     let corrected = false;
     let refinedQuery = null;
+    let webSearchUsed = false;
+    let webSearchAnswer = null;
+    let webSearchDocs = [];
 
     if (enableCorrection && (!evaluation.isRelevant || evaluation.score < RELEVANCE_THRESHOLD)) {
       const correctionResult = await correctiveRetrieval(query, initialDocs, evaluation);
       finalDocs = correctionResult.docs;
       corrected = correctionResult.corrected;
       refinedQuery = correctionResult.refinedQuery;
+    }
+
+    // Step 3b: Web search fallback when relevance is low or nothing was retrieved
+    const needsWebSearch = finalDocs.length === 0 || !evaluation.isRelevant || evaluation.score < RELEVANCE_THRESHOLD;
+    if (needsWebSearch) {
+      const webResult = await webSearchTavily(refinedQuery || query, MAX_WEB_RESULTS);
+      if (webResult.documents.length > 0) {
+        webSearchUsed = true;
+        webSearchAnswer = webResult.answer;
+        webSearchDocs = webResult.documents;
+        finalDocs = [...finalDocs, ...webResult.documents];
+      }
     }
 
     // Step 4: Build context from retrieved documents
@@ -499,7 +565,10 @@ export async function performCRAG(query, enableCorrection = true) {
       evaluation,
       corrected,
       refinedQuery,
-      originalQuery: query
+      originalQuery: query,
+      webSearchUsed,
+      webSearchAnswer,
+      webSearchDocCount: webSearchDocs.length
     };
   } catch (error) {
     console.error('Error in CRAG:', error);
